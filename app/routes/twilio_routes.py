@@ -143,3 +143,37 @@ async def make_outbound_call(request: Request):
             "status": "error",
             "message": str(e)
         })
+        
+@router.get("/twilio/status/{call_sid}")
+async def get_call_status(call_sid: str):
+    try:
+        twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        call = twilio_client.calls(call_sid).fetch()
+        logger.info(f"Retrieved status for call {call_sid}: {call.status}")
+        
+        # Map Twilio status to our status
+        status_mapping = {
+            'completed': 'completed',
+            'failed': 'failed',
+            'busy': 'failed',
+            'no-answer': 'failed',
+            'canceled': 'failed',
+            'in-progress': 'active',
+            'queued': 'initiating',
+            'ringing': 'initiating'
+        }
+        
+        mapped_status = status_mapping.get(call.status, 'active')
+        logger.info(f"Mapped status: {mapped_status}")
+        
+        return JSONResponse({
+            "status": mapped_status,
+            "twilio_status": call.status,
+            "duration": getattr(call, 'duration', 0)
+        })
+    except Exception as e:
+        logger.error(f"Error fetching call status: {str(e)}")
+        return JSONResponse({
+            "status": "error",
+            "message": str(e)
+        }, status_code=500)
