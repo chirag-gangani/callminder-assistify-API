@@ -1,6 +1,3 @@
-# callminder-demo
-Structured Code
-
 # Callminder Application
 
 ## Overview
