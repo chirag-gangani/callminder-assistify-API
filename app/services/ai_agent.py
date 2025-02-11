@@ -18,6 +18,7 @@ from .audio_manager import AudioStreamManager
 import random
 import whisper
 import time
+import httpx  # Import httpx for making HTTP requests
 
 # Define ai_agents as a global dictionary
 ai_agents = {}
@@ -50,31 +51,20 @@ class AI_SalesAgent:
         self.embeddings = []
         self.sources = []
         self.page_numbers = []
+        self.conversation_summary = None
 
     def check_for_end_call(self, text: str) -> bool:
         return any(phrase.lower() in text.lower() for phrase in END_CALL_PHRASES)\
 
     async def process_audio_to_text(self, audio_data: bytes) -> str:
         try:
-            logger.info("Processing audio with Whisper-Tiny (Local)")
-
             start_time = time.time()
-            
-            # Save the bytes to a temporary file-like object
             temp_file = io.BytesIO(audio_data)
-
-            # Run Whisper in an executor to keep function async-friendly
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, lambda: self.transcribe_audio(temp_file))
-
-            logger.debug(f"Raw STT response: {response}")
-
             transcribed_text = response
             elapsed_time = time.time() - start_time
-            logger.info(f"STT processing time: {elapsed_time:.2f} seconds")
-            logger.info(f"Transcribed text: {transcribed_text}")
             return transcribed_text
-
         except Exception as e:
             logger.error(f"Error in audio transcription: {str(e)}", exc_info=True)
             return ""
@@ -88,27 +78,19 @@ class AI_SalesAgent:
         try:
             if self.end_call_detected and ("yes" in user_input.lower() or "okay" in user_input.lower()):
                 self.end_call_confirmed = True
+                await self.print_summary()
                 return "Thank you for your time. Have a great day!", None, True
             
             if self.check_for_end_call(user_input) and not self.end_call_detected:
                 self.end_call_detected = True
                 return "Would you like to end our conversation?", None, False
             
+            # Retrieve relevant chunks and prepare the enhanced input
             retrieved = self.retrieve_relevant_chunks(user_input)
-            context = "\n".join([f"Context {i+1}: {chunk}" 
-                            for i, chunk in enumerate(retrieved.chunks)])
+            context = "\n".join([f"Context {i+1}: {chunk}" for i, chunk in enumerate(retrieved.chunks)])
             
-            enhanced_input = f"""User Input: {user_input}
-
-            Retrieved Context:
-            {context}
-
-            Based on the system prompt and above context, generate a response.
-
-            Current Entities Tracked:
-            {json.dumps(self.client_entities, indent=2)}"""
-            
-            self.conversation_history.append({"role": "user", "content": enhanced_input})
+            # Append only the user input to the conversation history
+            self.conversation_history.append({"role": "user", "content": user_input.strip()})
             
             # Run the OpenAI API call in a separate thread
             response = await asyncio.get_event_loop().run_in_executor(
@@ -128,13 +110,11 @@ class AI_SalesAgent:
             spoken_response, entities = self.extract_entities(response_text)
             
             # Log the AI-generated response
-            logger.info(f"AI Generated Response: {spoken_response}")
             
             if entities:
-                # Log the extracted entities
-                logger.info(f"Extracted Entities: {json.dumps(entities, indent=2)}")
                 self.update_entities(entities)
             
+            # Append only the spoken response to the conversation history
             self.conversation_history.append({"role": "assistant", "content": spoken_response})
             return spoken_response, None, self.end_call_detected
             
@@ -177,3 +157,73 @@ class AI_SalesAgent:
         result.page_numbers = [self.page_numbers[i] for i in top_k_indices]
         
         return result
+
+    async def generate_conversation_summary(self) -> str:
+        """Generate a summary of the conversation using OpenAI."""
+        try:
+            # Format the conversation history into a clear format for the AI
+            formatted_conversation = "\n".join([
+                f"{'User' if msg['role'] == 'user' else 'AI'}: {msg['content']}"
+                for msg in self.conversation_history
+                if msg['role'] != 'system'
+            ])
+
+            # Create the summarization prompt
+            summary_prompt = [
+    {"role": "system", "content": """Please analyze this sales conversation and provide a concise summary including:
+    1. Key points discussed  
+    2. Customer's main interests/concerns  
+    3. Any commitments or next steps  
+    4. Important details captured (contact info, requirements, etc.)  
+
+    Additionally, based on the conversation, classify the outcome with one of the following labels:  
+    - **Converted**: If the customer has successfully scheduled a meeting with the manager.  
+    - **Follow Up**: If the customer is interested but requests another time to connect.  
+    - **Rejected**: If the customer is not interested, declines the offer, or the conversation is missing/not found.  
+
+    At the end of the summary, explicitly mention the classification in the format: **Outcome: [Converted/Follow Up/Rejected]**.
+    """},
+    {"role": "user", "content": f"Here's the conversation to summarize:\n\n{formatted_conversation}"}
+]
+
+
+            # Get summary from OpenAI
+            response = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                lambda: self.openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo-1106",
+                    messages=summary_prompt,
+                    temperature=0.1,
+                    max_tokens=150
+                )
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            logger.error(f"Error generating conversation summary: {str(e)}")
+            return "Error generating summary"
+
+    def print_conversation(self):
+        for message in self.conversation_history:
+            if message["role"] == "user":
+                user_input = message["content"].split("User Input:")[-1].strip()
+                print(f"User: {user_input}")
+            elif message["role"] == "assistant":
+                print(f"AI: {message['content']}")
+        
+    async def print_summary(self):
+        summary = await self.generate_conversation_summary()
+        self.conversation_summary = summary
+        
+    def get_latest_summary(self) -> dict:
+        """Return the latest conversation summary with status."""
+        if self.conversation_summary:
+            return {
+                "status": "success",
+                "summary": self.conversation_summary
+            }
+        return {
+            "status": "pending",
+            "summary": "No summary available yet - call may still be in progress"
+        }

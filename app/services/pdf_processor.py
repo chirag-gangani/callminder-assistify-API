@@ -16,18 +16,14 @@ class PDFProcessor:
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
             text = ""
-            logger.info(f"Processing PDF with {len(pdf_reader.pages)} pages")
             
             for i, page in enumerate(pdf_reader.pages):
                 page_text = page.extract_text()
                 text += page_text
-                logger.debug(f"Page {i+1} extracted text length: {len(page_text)} characters")
             
             if not text.strip():
-                logger.warning("No text extracted from PDF")
                 return None
                 
-            logger.info(f"Total extracted text length: {len(text)} characters")
             return text
             
         except Exception as e:
@@ -60,7 +56,6 @@ class PDFProcessor:
 
     def create_sales_prompt(self, company_info: dict) -> str:
         try:
-            logger.info("Creating sales prompt from structured info")
             
             prompt = f"""You are an outbound AI sales agent for {company_info['company_name']}.
             You've already introduced yourself at the start of the call, so don't introduce yourself again. 
@@ -78,7 +73,6 @@ class PDFProcessor:
             Consider today's date as {datetime.now().strftime("%d-%m-%Y")} and time as {datetime.now().strftime("%I:%M %p")}.
             """
             
-            logger.debug("Generated prompt")
             return prompt
             
         except Exception as e:
@@ -93,7 +87,6 @@ class PDFProcessor:
 
     def structure_company_info(self, pdf_text: str) -> Optional[dict]:
         try:
-            logger.info("Structuring company information from PDF text")
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
@@ -110,7 +103,6 @@ class PDFProcessor:
             )
 
             structured_info = json.loads(response.choices[0].message.content.strip())
-            logger.info("Successfully structured company info")
             return structured_info
 
         except Exception as e:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, File, UploadFile
+from fastapi import APIRouter, Request, File, UploadFile, HTTPException
 from fastapi.responses import Response, JSONResponse
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from ..services.ai_agent import AI_SalesAgent, ai_agents
@@ -6,11 +6,53 @@ from ..services.pdf_processor import PDFProcessor
 from twilio.rest import Client
 from ..config import settings  # Ensure you have a config file to load environment variables
 import logging  # Import logging
+from pydantic import BaseModel
 
 # Set up logging
 logger = logging.getLogger(__name__)  # Initialize the logger
 
 router = APIRouter()
+
+class SummaryResponse(BaseModel):
+    summary: str
+    status: str = "success"
+
+@router.get("/get_summary", response_model=SummaryResponse)
+async def get_summary():
+    """Endpoint to get the latest conversation summary."""
+    try:
+        if not ai_agents:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": "error",
+                    "summary": "No active conversations found"
+                }
+            )
+
+        # Get the latest agent's ID (assuming it's the most recent key)
+        latest_call_id = max(ai_agents.keys())
+        latest_agent = ai_agents[latest_call_id]
+        
+        result = latest_agent.get_latest_summary()
+        
+        if result["status"] == "pending":
+            return JSONResponse(
+                status_code=202,  # 202 Accepted indicates the request is processing
+                content=result
+            )
+            
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error getting summary: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "summary": f"Error retrieving summary: {str(e)}"
+            }
+        )
 
 @router.post("/twilio/voice")
 async def handle_incoming_call(request: Request):
@@ -63,7 +105,6 @@ async def process_speech(request: Request):
             # Add the main response
             gather.say(response_text)
             response.append(gather)
-        
         return Response(content=str(response), media_type='text/xml')
             
     except Exception as e:
@@ -124,15 +165,19 @@ async def make_outbound_call(request: Request):
         # Your ngrok URL
         ngrok_url = settings.NGROK_URL
         twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        
         # Make the call
         call = twilio_client.calls.create(
             to=phone_number,
             from_=settings.TWILIO_FROM_NUMBER,
             url=f"{ngrok_url}/twilio/voice",  # This will trigger the initial greeting
-            status_callback=f"{ngrok_url}/twilio/status",
             status_callback_event=['completed', 'failed']
         )
         
+        # Update the status_callback after the call is created
+        call = twilio_client.calls(call.sid).update(
+            status_callback=f"{ngrok_url}/twilio/status/{call.sid}"
+        )
         return JSONResponse({
             "status": "success",
             "call_sid": call.sid
@@ -149,7 +194,6 @@ async def get_call_status(call_sid: str):
     try:
         twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         call = twilio_client.calls(call_sid).fetch()
-        logger.info(f"Retrieved status for call {call_sid}: {call.status}")
         
         # Map Twilio status to our status
         status_mapping = {
@@ -164,7 +208,6 @@ async def get_call_status(call_sid: str):
         }
         
         mapped_status = status_mapping.get(call.status, 'active')
-        logger.info(f"Mapped status: {mapped_status}")
         
         return JSONResponse({
             "status": mapped_status,

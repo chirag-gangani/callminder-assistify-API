@@ -2,7 +2,7 @@ from . import create_app
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from .config import settings
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi import Request
@@ -10,6 +10,7 @@ import logging
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.twilio_routes import router as twilio_router
 import asyncio
+from app.services.ai_agent import AI_SalesAgent  # Import the AI_SalesAgent class
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -36,6 +37,9 @@ openai_client = None
 # Include the router
 app.include_router(twilio_router)
 
+# Create a global instance of AI_SalesAgent
+ai_sales_agent = AI_SalesAgent()
+
 def load_sentence_transformer():
     global sentence_transformer_model
     try:
@@ -56,7 +60,6 @@ async def startup_event():
         
         # Initialize OpenAI client
         openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        logger.info("OpenAI client initialized successfully.")
         
     except Exception as e:
         # Removed logging for startup errors
@@ -84,7 +87,6 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             # Log only the message received for OpenAI response generation
-            logger.info(f"Received WebSocket message: {data}")
             await websocket.send_text(f"Message text was: {data}")
     except WebSocketDisconnect:
         # Removed logging for WebSocket disconnection
