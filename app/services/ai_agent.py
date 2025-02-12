@@ -176,6 +176,8 @@ class AI_SalesAgent:
     3. Any commitments or next steps  
     4. Important details captured (contact info, requirements, etc.)  
 
+     Do **not** include a "Key points discussed" section. 
+
     Additionally, based on the conversation, classify the outcome with one of the following labels:  
     - **Converted**: If the customer has successfully scheduled a meeting with the manager.  
     - **Follow Up**: If the customer is interested but requests another time to connect.  

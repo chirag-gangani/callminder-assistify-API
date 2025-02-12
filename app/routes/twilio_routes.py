@@ -17,24 +17,21 @@ class SummaryResponse(BaseModel):
     summary: str
     status: str = "success"
 
-@router.get("/get_summary", response_model=SummaryResponse)
-async def get_summary():
-    """Endpoint to get the latest conversation summary."""
+@router.get("/get_summary/{call_sid}", response_model=SummaryResponse)
+async def get_summary(call_sid: str):
+    """Endpoint to get the conversation summary for a specific call SID."""
     try:
-        if not ai_agents:
+        if call_sid not in ai_agents:
             return JSONResponse(
                 status_code=404,
                 content={
                     "status": "error",
-                    "summary": "No active conversations found"
+                    "summary": "No active conversation found for the provided Call SID"
                 }
             )
 
-        # Get the latest agent's ID (assuming it's the most recent key)
-        latest_call_id = max(ai_agents.keys())
-        latest_agent = ai_agents[latest_call_id]
-        
-        result = latest_agent.get_latest_summary()
+        agent = ai_agents[call_sid]
+        result = agent.get_latest_summary()
         
         if result["status"] == "pending":
             return JSONResponse(
