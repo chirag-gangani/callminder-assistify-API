@@ -147,7 +147,7 @@ class AI_SalesAgent:
                         {"role": "user", "content": enhanced_prompt}
                     ],
                     temperature=0.1,
-                    max_tokens=150
+                    max_tokens=90
                 )
             )
             

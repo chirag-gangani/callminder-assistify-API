@@ -57,7 +57,7 @@ class GoogleCalendarManager:
                     'timeZone': 'Asia/Kolkata',
                 },
                 'attendees': [
-                    {'email': entities.get('email')} if entities.get('email') else None
+                    {'email': entities.get('email')}  # Allow any email format
                 ],
                 'reminders': {
                     'useDefault': True
