@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)  # Initialize the logger
 
 router = APIRouter()
 
-caller_names = {}
-
 class SummaryResponse(BaseModel):
     summary: str
     status: str = "success"
@@ -52,35 +50,21 @@ async def get_summary(call_sid: str):
                 "summary": f"Error retrieving summary: {str(e)}"
             }
         )
-@router.post("/twilio/voice")  # Changed from GET to POST as Twilio makes POST requests
-async def handle_incoming_call(request: Request):
-    try:
-        # Get form data instead of query parameters as Twilio sends POST data
-        form_data = await request.form()
-        call_sid = form_data.get('CallSid')
-        user_name = caller_names.get(call_sid, '')
-        
-        response = VoiceResponse()
-        gather = Gather(
-            input='speech',
-            action='/process_speech',
-            method='POST',
-            language='en-US',
-            speechTimeout=1,
-            timeout=5
-        )
-        # Include the user's name in the greeting if available
-        greeting = f"Hello!{f' {user_name}' if user_name else ''} I'm calling from Toshal Infotech. Is this a good time to talk?"
-        gather.say(greeting)
-        response.append(gather)
-        return Response(content=str(response), media_type='text/xml')
-    except Exception as e:
-        logger.error(f"Error in handle_incoming_call: {str(e)}")
-        # Provide a fallback response in case of error
-        response = VoiceResponse()
-        response.say("Hello! I'm calling from Toshal Infotech. Is this a good time to talk?")
-        return Response(content=str(response), media_type='text/xml')
 
+@router.post("/twilio/voice")
+async def handle_incoming_call(request: Request):
+    response = VoiceResponse()
+    gather = Gather(
+        input='speech',
+        action='/process_speech',
+        method='POST',
+        language='en-US',
+        speechTimeout=1,
+        timeout=5
+    )
+    gather.say("Hello! I'm calling from Toshal Infotech. Is this a good time to talk?")
+    response.append(gather)
+    return Response(content=str(response), media_type='text/xml')
 
 @router.post("/process_speech")
 async def process_speech(request: Request):
@@ -165,7 +149,6 @@ async def make_outbound_call(request: Request):
     try:
         data = await request.json()
         phone_number = data.get('phone_number')
-        name = data.get('name')
         
         if not phone_number:
             return JSONResponse({
@@ -187,16 +170,9 @@ async def make_outbound_call(request: Request):
             status_callback_event=['completed', 'failed']
         )
         
-        # Store the name with the call_sid
-        global caller_names
-        caller_names[call.sid] = name
-        logger.info(f"Stored name {name} for call {call.sid}")
-        
-        # Set the status callback
         call = twilio_client.calls(call.sid).update(
             status_callback=f"{ngrok_url}/twilio/status/{call.sid}"
         )
-        
         return JSONResponse({
             "status": "success",
             "call_sid": call.sid
@@ -207,24 +183,9 @@ async def make_outbound_call(request: Request):
             "status": "error",
             "message": str(e)
         })
-
+        
 @router.get("/twilio/status/{call_sid}")
-async def handle_call_status(call_sid: str, request: Request):
-    try:
-        form_data = await request.form()
-        call_status = form_data.get('CallStatus')
-        
-        if call_status in ['completed', 'failed', 'busy', 'no-answer', 'canceled']:
-            # Clean up the caller_names dictionary
-            global caller_names
-            if call_sid in caller_names:
-                del caller_names[call_sid]
-                logger.info(f"Cleaned up name for call {call_sid}")
-        
-        return JSONResponse({"status": "success"})
-    except Exception as e:
-        logger.error(f"Error handling call status: {str(e)}")
-        return JSONResponse({"status": "error", "message": str(e)})
+async def get_call_status(call_sid: str):
     try:
         twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         call = twilio_client.calls(call_sid).fetch()
