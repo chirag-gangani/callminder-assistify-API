@@ -15,8 +15,8 @@ from ..models.retrieval import RetrievalResult
 from .audio_manager import AudioStreamManager
 import whisper
 import re
-from .google_calendar_manager import GoogleCalendarManager
-from .salesforce_integration import SalesforceIntegration
+from .google_calendar_manager import GoogleCalendarManager  # Import GoogleCalendarManager
+from .salesforce_integration import SalesforceIntegration  # Import SalesforceIntegration
 
 # Define ai_agents as a global dictionary
 ai_agents = {}
@@ -27,7 +27,7 @@ executor = ThreadPoolExecutor(max_workers=10)
 model = whisper.load_model("tiny")
 
 class AI_SalesAgent:
-    def __init__(self, system_prompt=None, encoder=None):
+    def __init__(self, system_prompt=None, encoder=None): 
         self.system_prompt = system_prompt or DEFAULT_SALES_PROMPT
         self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
         self.smallestai_client = Smallest(api_key=settings.SMALLEST_API_KEY)
@@ -44,18 +44,18 @@ class AI_SalesAgent:
             "industry": None
         }
         self.audio_manager = AudioStreamManager()
-        self.encoder = encoder
+        self.encoder = encoder  # Use the encoder passed as an argument
         self.documents = []
         self.embeddings = []
         self.sources = []
         self.page_numbers = []
         self.conversation_summary = None
         self.raw_entity_history = []
-        self.calendar_manager = GoogleCalendarManager()
-        self.salesforce_integration = SalesforceIntegration()
+        self.calendar_manager = GoogleCalendarManager()  # Initialize Google Calendar Manager
+        self.salesforce_integration = SalesforceIntegration()  # Initialize Salesforce Integration
 
     def check_for_end_call(self, text: str) -> bool:
-        return any(phrase.lower() in text.lower() for phrase in END_CALL_PHRASES)
+        return any(phrase.lower() in text.lower() for phrase in END_CALL_PHRASES)\
 
     async def process_audio_to_text(self, audio_data: bytes) -> str:
         try:
@@ -69,7 +69,8 @@ class AI_SalesAgent:
             return ""
 
     def transcribe_audio(temp_file: io.BytesIO) -> str:
-        temp_file.seek(0)
+        """Helper function to transcribe audio from a BytesIO object using Whisper-Tiny."""
+        temp_file.seek(0)  # Reset file pointer
         return model.transcribe(temp_file)["text"]
 
     def sanitize_email(self, email: str) -> str:
@@ -90,6 +91,7 @@ class AI_SalesAgent:
                 logger.debug(f"Raw entity history length: {len(self.raw_entity_history)}")
                 self.print_raw_entities()
 
+                # Sanitize email before creating calendar event and Salesforce lead
                 sanitized_email = self.sanitize_email(self.client_entities.get('email', ''))
                 if sanitized_email:
                     self.client_entities['email'] = sanitized_email
@@ -97,9 +99,11 @@ class AI_SalesAgent:
                     logger.error("Invalid email address provided. Cannot create calendar event or Salesforce lead.")
                     return "Thank you for your time. However, there was an issue with the email provided.", None, True
 
+                # Create Google Calendar event
                 calendar_event_response = self.calendar_manager.create_calendar_event(self.client_entities)
                 logger.debug(f"Calendar event creation response: {calendar_event_response}")
 
+                # Create Salesforce lead
                 salesforce_lead_response = self.salesforce_integration.create_lead(self.client_entities)
                 logger.debug(f"Salesforce lead creation response: {salesforce_lead_response}")
 
@@ -109,6 +113,7 @@ class AI_SalesAgent:
                 self.end_call_detected = True
                 return "Would you like to end our conversation?", None, False
             
+            # Parse the current conversation for entities
             current_entities = self.parse_conversation_for_entities(user_input)
             
             # Create the prompt with the current entity state
@@ -147,7 +152,7 @@ class AI_SalesAgent:
                         {"role": "user", "content": enhanced_prompt}
                     ],
                     temperature=0.1,
-                    max_tokens=90
+                    max_tokens=150
                 )
             )
             
@@ -157,7 +162,10 @@ class AI_SalesAgent:
             print("***********************************")
             
             # Extract entities and store them
-            spoken_response, entities = self.extract_entities(response_text)
+            spoken_response, entities = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                lambda: self.extract_entities(response_text)
+            )
             
             if entities:
                 logger.debug(f"Extracted entities: {entities}")
@@ -240,6 +248,7 @@ class AI_SalesAgent:
                     except json.JSONDecodeError as e:
                         logger.error(f"JSON parsing error: {str(e)}, Raw text: {entities_text}")
             
+            # Ensure that the response does not include extra data
             return spoken_response, entities
             
         except Exception as e:
