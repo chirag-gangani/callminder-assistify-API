@@ -55,6 +55,30 @@ class AI_SalesAgent:
         self.calendar_manager = GoogleCalendarManager()  # Initialize Google Calendar Manager
         self.salesforce_integration = SalesforceIntegration()  # Initialize Salesforce Integration
 
+        # Preload the OpenAI model
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(self.preload_openai_model())
+        else:
+            asyncio.run(self.preload_openai_model())
+
+    async def preload_openai_model(self):
+        """Preload the OpenAI model to reduce initial delay."""
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Preloading model."},
+                    {"role": "user", "content": "Hello"}
+                ],
+                temperature=0,
+                max_tokens=1
+            ))
+            logger.info("OpenAI model preloaded successfully.")
+        except Exception as e:
+            logger.error(f"Error preloading OpenAI model: {str(e)}")
+
     def check_for_end_call(self, text: str) -> bool:
         return any(phrase.lower() in text.lower() for phrase in END_CALL_PHRASES)\
 
@@ -194,7 +218,7 @@ class AI_SalesAgent:
                     *self.conversation_history,
                     {"role": "user", "content": enhanced_prompt}
                 ],
-                temperature=0.1,
+                temperature=0,
                 max_tokens=150
             ))
 

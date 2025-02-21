@@ -25,3 +25,4 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+print("NGROK URL >>>>>>>>>>>>>>>>> ", settings.NGROK_URL)

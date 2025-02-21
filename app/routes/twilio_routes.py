@@ -71,7 +71,7 @@ async def handle_incoming_call(request: Request):
         )
         # Include the user's name in the greeting if available
         greeting = f"Hello!{f' {user_name}' if user_name else ''} I'm calling from Toshal Infotech. Is this a good time to talk?"
-        gather.say(greeting)
+        gather.say(f'<speak><prosody rate="110%" pitch="+2st" volume="loud">{greeting}</prosody></speak>', ssml=True)
         response.append(gather)
         return Response(content=str(response), media_type='text/xml')
     except Exception as e:
@@ -116,7 +116,7 @@ async def process_speech(request: Request):
                     gather.pause(length=0.3)
             
             # Add the main response
-            gather.say(response_text)
+            gather.say(f'<speak><prosody rate="110%" pitch="+2st" volume="loud">{response_text}</prosody></speak>', ssml=True)
             response.append(gather)
         return Response(content=str(response), media_type='text/xml')
             
@@ -221,11 +221,6 @@ async def handle_call_status(call_sid: str, request: Request):
                 del caller_names[call_sid]
                 logger.info(f"Cleaned up name for call {call_sid}")
         
-        return JSONResponse({"status": "success"})
-    except Exception as e:
-        logger.error(f"Error handling call status: {str(e)}")
-        return JSONResponse({"status": "error", "message": str(e)})
-    try:
         twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         call = twilio_client.calls(call_sid).fetch()
         
@@ -241,7 +236,7 @@ async def handle_call_status(call_sid: str, request: Request):
             'ringing': 'initiating'
         }
         
-        mapped_status = status_mapping.get(call.status, 'active')
+        mapped_status = status_mapping.get(call.status, 'failed')
         
         return JSONResponse({
             "status": mapped_status,
