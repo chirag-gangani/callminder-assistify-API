@@ -342,6 +342,8 @@ class AI_SalesAgent:
     3. Any commitments or next steps  
     4. Important details captured (contact info, requirements, etc.)  
 
+    If you did not get conversation for analyze, give "Conversation Not Found For make Summary" in response.
+
      Do **not** include a "Key points discussed" section. 
 
     Additionally, based on the conversation, classify the outcome with one of the following labels:  
@@ -393,7 +395,7 @@ class AI_SalesAgent:
             }
         return {
             "status": "pending",
-            "summary": "No summary available yet - call may still be in progress"
+            "summary": "No summary available."
         }
         
     def print_raw_entities(self):

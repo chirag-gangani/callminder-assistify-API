@@ -19,39 +19,6 @@ class SummaryResponse(BaseModel):
     summary: str
     status: str = "success"
 
-@router.get("/get_summary/{call_sid}", response_model=SummaryResponse)
-async def get_summary(call_sid: str):
-    """Endpoint to get the conversation summary for a specific call SID."""
-    try:
-        if call_sid not in ai_agents:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "status": "error",
-                    "summary": "No active conversation found for the provided Call SID"
-                }
-            )
-
-        agent = ai_agents[call_sid]
-        result = agent.get_latest_summary()
-        
-        if result["status"] == "pending":
-            return JSONResponse(
-                status_code=202,  # 202 Accepted indicates the request is processing
-                content=result
-            )
-            
-        return JSONResponse(content=result)
-        
-    except Exception as e:
-        logger.error(f"Error getting summary: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "summary": f"Error retrieving summary: {str(e)}"
-            }
-        )
 @router.post("/twilio/voice")  # Changed from GET to POST as Twilio makes POST requests
 async def handle_incoming_call(request: Request):
     try:
@@ -184,6 +151,7 @@ async def make_outbound_call(request: Request):
             to=phone_number,
             from_=settings.TWILIO_FROM_NUMBER,
             url=f"{ngrok_url}/twilio/voice",  # Initial URL
+            status_callback=f"{ngrok_url}/call_ends",  # Call ends callback
             status_callback_event=['completed', 'failed']
         )
         
@@ -249,4 +217,41 @@ async def handle_call_status(call_sid: str, request: Request):
             "status": "error",
             "message": str(e)
         }, status_code=500)
+
+@router.get("/call_ends/{call_sid}", response_model=SummaryResponse)
+async def call_ends(call_sid: str):
+    """Endpoint to handle call end events and generate a summary."""
+    print("**********************")
+    print("Call Ends Successfully")
+    print("**********************")
+    try:
+        if call_sid not in ai_agents:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": "error",
+                    "summary": "No active conversation found for the provided Call SID"
+                }
+            )
+
+        agent = ai_agents[call_sid]
+        result = agent.get_latest_summary()
+        print("<<<<<<<<<<<<<< Summary >>>>>>>>>>>>>>>>>>>\n",result)
+        if result["status"] == "pending":
+            return JSONResponse(
+                status_code=202,  # 202 Accepted indicates the request is processing
+                content=result
+            )
+            
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error getting summary: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "summary": f"Error retrieving summary: {str(e)}"
+            }
+        )
     
