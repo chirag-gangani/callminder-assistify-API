@@ -28,7 +28,7 @@ class GoogleCalendarManager:
             else:
                 raise Exception("Invalid credentials or refresh token.")
 
-    def create_calendar_event(self, entities):
+    async def create_calendar_event(self, entities):
         try:
             if not entities.get('meeting_date') or not entities.get('meeting_time'):
                 return {"success": False, "error": "Missing meeting date or time"}

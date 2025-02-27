@@ -17,7 +17,7 @@ class SalesforceIntegration:
         )
         self.initialized = True
 
-    def create_lead(self, client_entities):
+    async def create_lead(self, client_entities):
         if not self.initialized:
             return False
             
@@ -39,11 +39,14 @@ class SalesforceIntegration:
             print("**********************************************")
             print("<<<<<<<<<<<<<< Response >>>>>>>>>>>>>>\n", response)
             print("**********************************************")
-            if response.status_code == 201:
-                logger.info("Lead created successfully.")
+            
+            # Check if response is successful (simple_salesforce returns OrderedDict with 'success' key)
+            if response and response.get('success') == True:
+                logger.info(f"Lead created successfully with ID: {response.get('id')}")
                 return True
             else:
-                logger.error(f"Failed to create lead: {response.text}")
+                errors = response.get('errors', []) if response else ['Unknown error']
+                logger.error(f"Failed to create lead: {errors}")
                 return False
                 
         except Exception as e:
@@ -58,4 +61,5 @@ class SalesforceIntegration:
             lead = self.sf.Lead.get(lead_id)
             return lead
         except Exception as e:
+            logger.error(f"Error verifying lead {lead_id}: {str(e)}")
             return None
