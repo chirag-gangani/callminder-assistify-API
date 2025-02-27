@@ -25,7 +25,7 @@ ai_agents = {}
 logger = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=10)
 
-model = whisper.load_model("tiny")
+model = whisper.load_model("base")
 
 class AI_SalesAgent:
     def __init__(self, system_prompt=None, encoder=None): 
@@ -151,12 +151,11 @@ class AI_SalesAgent:
             if self.end_call_detected:
                 if "yes" in user_input.lower() or "okay" in user_input.lower():
                     self.end_call_confirmed = True
-                    await self.print_summary()
                     logger.debug(f"Current client entities: {self.client_entities}")
                     logger.debug(f"Raw entity history length: {len(self.raw_entity_history)}")
                     self.print_raw_entities()
 
-                    # Sanitize email before creating calendar event and Salesforce lead
+                    # Sanitize email before returning
                     sanitized_email = self.sanitize_email(self.client_entities.get('email', ''))
                     if sanitized_email:
                         self.client_entities['email'] = sanitized_email
@@ -164,18 +163,7 @@ class AI_SalesAgent:
                         logger.error("Invalid email address provided. Cannot create calendar event or Salesforce lead.")
                         return "Thank you for your time. However, there was an issue with the email provided.", None, True
 
-                    # Create Google Calendar event and Salesforce lead concurrently
-                    loop = asyncio.get_event_loop()
-                    calendar_task = loop.run_in_executor(None, lambda: self.calendar_manager.create_calendar_event(self.client_entities))
-                    salesforce_task = loop.run_in_executor(None, lambda: self.salesforce_integration.create_lead(self.client_entities))
-                    calendar_event_response, salesforce_lead_response = await asyncio.gather(calendar_task, salesforce_task)
-
-                    logger.debug(f"Calendar event creation response: {calendar_event_response}")
-                    logger.debug(f"Salesforce lead creation response: {salesforce_lead_response}")
-
-                    return "Thank you for your time. Have a great day!", None, True
-                else:
-                    return "I didn't catch that. Would you like to end our conversation?", None, False
+                    return "Thank you for your time. The call has ended.", None, True  # Return without creating events
 
             if self.check_for_end_call(user_input) and not self.end_call_detected:
                 self.end_call_detected = True
@@ -327,13 +315,14 @@ class AI_SalesAgent:
     async def generate_conversation_summary(self) -> str:
         """Generate a summary of the conversation using OpenAI."""
         try:
+            print("start")
             # Format the conversation history into a clear format for the AI
             formatted_conversation = "\n".join([
                 f"{'User' if msg['role'] == 'user' else 'AI'}: {msg['content']}"
                 for msg in self.conversation_history
                 if msg['role'] != 'system'
             ])
-
+            print("formatted_conversation",formatted_conversation)
             # Create the summarization prompt
             summary_prompt = [
     {"role": "system", "content": """Please analyze this sales conversation and provide a concise summary including:
@@ -368,8 +357,8 @@ class AI_SalesAgent:
                 )
             )
 
+            print("END>>>>>>>>>>",response.choices[0].message.content)
             return response.choices[0].message.content
-
         except Exception as e:
             logger.error(f"Error generating conversation summary: {str(e)}")
             return "Error generating summary"
@@ -383,6 +372,7 @@ class AI_SalesAgent:
                 print(f"AI: {message['content']}")
         
     async def print_summary(self):
+        print("HELLO")
         summary = await self.generate_conversation_summary()
         self.conversation_summary = summary
         

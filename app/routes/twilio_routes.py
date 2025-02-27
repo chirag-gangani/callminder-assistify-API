@@ -7,9 +7,18 @@ from twilio.rest import Client
 from ..config import settings  # Ensure you have a config file to load environment variables
 import logging  # Import logging
 from pydantic import BaseModel
+import asyncio
 
 # Set up logging
 logger = logging.getLogger(__name__)  # Initialize the logger
+
+# Suppress Twilio INFO logs
+twilio_logger = logging.getLogger('twilio')
+twilio_logger.setLevel(logging.WARNING)  # Set to WARNING to suppress INFO logs
+
+# Suppress other INFO logs
+logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
 
 router = APIRouter()
 
@@ -38,7 +47,7 @@ async def handle_incoming_call(request: Request):
         )
         # Include the user's name in the greeting if available
         greeting = f"Hello!{f' {user_name}' if user_name else ''} I'm calling from Toshal Infotech. Is this a good time to talk?"
-        gather.say(f'<speak><prosody rate="110%" pitch="+2st" volume="loud">{greeting}</prosody></speak>', ssml=True)
+        gather.say(f'<speak><prosody rate="100%" pitch="+2st" volume="soft">{greeting}</prosody></speak>', ssml=True)
         response.append(gather)
         return Response(content=str(response), media_type='text/xml')
     except Exception as e:
@@ -55,6 +64,9 @@ async def process_speech(request: Request):
         form_data = await request.form()
         call_sid = form_data.get('CallSid')
         speech_result = form_data.get('SpeechResult', '')
+        
+        # Add print message for user input
+        print(f"User input received:\n {speech_result}")  # Print user input
         
         if call_sid not in ai_agents:
             ai_agents[call_sid] = AI_SalesAgent()
@@ -83,7 +95,7 @@ async def process_speech(request: Request):
                     gather.pause(length=0.3)
             
             # Add the main response
-            gather.say(f'<speak><prosody rate="110%" pitch="+2st" volume="loud">{response_text}</prosody></speak>', ssml=True)
+            gather.say(f'<speak><prosody rate="100%" pitch="+2st" volume="loud">{response_text}</prosody></speak>', ssml=True)
             response.append(gather)
         return Response(content=str(response), media_type='text/xml')
             
@@ -235,14 +247,52 @@ async def call_ends(call_sid: str):
             )
 
         agent = ai_agents[call_sid]
+        await agent.print_summary()
+
+        try:
+            # Check for required entities and ensure they are not null
+            required_entities = ['name', 'email', 'company_name', 'meeting_date', 'meeting_time']
+            if all(agent.client_entities.get(entity) for entity in required_entities):
+                # Sanitize email before creating calendar event and Salesforce lead
+                sanitized_email = agent.sanitize_email(agent.client_entities.get('email', ''))
+                if sanitized_email:
+                    agent.client_entities['email'] = sanitized_email
+                    
+                    # Log the client entities before creating the lead
+                    logger.info(f"Creating lead with the following client entities: {agent.client_entities}")
+
+                    # Create Google Calendar event and Salesforce lead concurrently
+                    calendar_task = asyncio.create_task(agent.calendar_manager.create_calendar_event(agent.client_entities))
+                    salesforce_task = asyncio.create_task(agent.salesforce_integration.create_lead(agent.client_entities))
+                    await asyncio.gather(calendar_task, salesforce_task)
+
+                    # Add print message after generating lead and event
+                    print("Lead generated on Salesforce and calendar event created successfully.")
+                    
+                else:
+                    logger.error("Invalid email address provided. Cannot create calendar event or Salesforce lead.")
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "status": "error",
+                            "summary": "Invalid email address provided."
+                        }
+                    )
+            else:
+                logger.warning("Required entities are missing or null. Client entities: {}".format(agent.client_entities))
+                print("Required entities are missing or null. Continuing with other processes.")
+        except Exception as e:
+                    logger.error(f"Error creating lead or calendar event: {e}")
+                    print(f"Error creating lead or calendar event: {e}")
+        # Generate the summary regardless of lead and event creation
         result = agent.get_latest_summary()
-        print("<<<<<<<<<<<<<< Summary >>>>>>>>>>>>>>>>>>>\n",result)
+        print("<<<<<<<<<<<<<< Summary >>>>>>>>>>>>>>>>>>>\n", result)
         if result["status"] == "pending":
             return JSONResponse(
                 status_code=202,  # 202 Accepted indicates the request is processing
                 content=result
             )
-            
+        
         return JSONResponse(content=result)
         
     except Exception as e:
