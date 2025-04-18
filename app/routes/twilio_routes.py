@@ -163,7 +163,7 @@ async def make_outbound_call(request: Request):
             to=phone_number,
             from_=settings.TWILIO_FROM_NUMBER,
             url=f"{ngrok_url}/twilio/voice",  # Initial URL
-            status_callback=f"{ngrok_url}/call_ends",  # Call ends callback
+            status_callback=f"{ngrok_url}/call_ends",  # Updated: removed path parameter
             status_callback_event=['completed', 'failed']
         )
         
@@ -174,7 +174,7 @@ async def make_outbound_call(request: Request):
         
         # Set the status callback
         call = twilio_client.calls(call.sid).update(
-            status_callback=f"{ngrok_url}/twilio/status/{call.sid}"
+            status_callback=f"{ngrok_url}/call_ends" # Updated: removed path parameter
         )
         
         return JSONResponse({
@@ -230,14 +230,36 @@ async def handle_call_status(call_sid: str, request: Request):
             "message": str(e)
         }, status_code=500)
 
+@router.post("/call_ends")
 @router.get("/call_ends/{call_sid}", response_model=SummaryResponse)
-async def call_ends(call_sid: str):
-    """Endpoint to handle call end events and generate a summary."""
+async def call_ends(request: Request = None, call_sid: str = None):
+    """
+    Endpoint to handle call end events and generate a summary.
+    Supports both POST (from Twilio callbacks) and GET (with explicit call_sid) methods.
+    """
     print("**********************")
     print("Call Ends Successfully")
     print("**********************")
+    
     try:
+        # Handle POST request from Twilio callback
+        if request and not call_sid:
+            form_data = await request.form()
+            call_sid = form_data.get('CallSid')
+            
+            if not call_sid:
+                logger.error("No CallSid provided in the request")
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "status": "error",
+                        "summary": "No CallSid provided in the request"
+                    }
+                )
+                
+        # Check if we have an agent for this call_sid
         if call_sid not in ai_agents:
+            logger.warning(f"No active conversation found for Call SID: {call_sid}")
             return JSONResponse(
                 status_code=404,
                 content={
@@ -279,11 +301,13 @@ async def call_ends(call_sid: str):
                         }
                     )
             else:
-                logger.warning("Required entities are missing or null. Client entities: {}".format(agent.client_entities))
-                print("Required entities are missing or null. Continuing with other processes.")
+                missing_entities = [entity for entity in required_entities if not agent.client_entities.get(entity)]
+                logger.warning(f"Required entities are missing or null: {missing_entities}. Client entities: {agent.client_entities}")
+                print(f"Required entities are missing or null: {missing_entities}. Continuing with other processes.")
         except Exception as e:
-                    logger.error(f"Error creating lead or calendar event: {e}")
-                    print(f"Error creating lead or calendar event: {e}")
+            logger.error(f"Error creating lead or calendar event: {e}")
+            print(f"Error creating lead or calendar event: {e}")
+            
         # Generate the summary regardless of lead and event creation
         result = agent.get_latest_summary()
         print("<<<<<<<<<<<<<< Summary >>>>>>>>>>>>>>>>>>>\n", result)
