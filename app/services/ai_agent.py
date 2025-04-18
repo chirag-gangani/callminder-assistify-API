@@ -25,7 +25,8 @@ ai_agents = {}
 logger = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=10)
 
-model = whisper.load_model("base")
+model = whisper.load_model("base") # or small
+# model = WhisperModel("small", device="cpu", compute_type="int8")
 
 class AI_SalesAgent:
     def __init__(self, system_prompt=None, encoder=None): 
