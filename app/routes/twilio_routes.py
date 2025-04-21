@@ -9,6 +9,8 @@ import logging  # Import logging
 from pydantic import BaseModel
 import asyncio
 
+server_URL = settings.NGROK_URL  # Ensure you have a config file to load environment variables
+
 # Set up logging
 logger = logging.getLogger(__name__)  # Initialize the logger
 
@@ -329,3 +331,9 @@ async def call_ends(request: Request = None, call_sid: str = None):
             }
         )
     
+@router.get("/config")
+async def get_config(request: Request):
+    return {
+        "wsUrl": server_URL
+    }
+
