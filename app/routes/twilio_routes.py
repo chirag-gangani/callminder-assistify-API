@@ -7,9 +7,20 @@ from twilio.rest import Client
 from ..config import settings  # Ensure you have a config file to load environment variables
 import logging  # Import logging
 from pydantic import BaseModel
+import asyncio
+
+server_URL = settings.NGROK_URL  # Ensure you have a config file to load environment variables
 
 # Set up logging
 logger = logging.getLogger(__name__)  # Initialize the logger
+
+# Suppress Twilio INFO logs
+twilio_logger = logging.getLogger('twilio')
+twilio_logger.setLevel(logging.WARNING)  # Set to WARNING to suppress INFO logs
+
+# Suppress other INFO logs
+logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
 
 router = APIRouter()
 
@@ -19,39 +30,6 @@ class SummaryResponse(BaseModel):
     summary: str
     status: str = "success"
 
-@router.get("/get_summary/{call_sid}", response_model=SummaryResponse)
-async def get_summary(call_sid: str):
-    """Endpoint to get the conversation summary for a specific call SID."""
-    try:
-        if call_sid not in ai_agents:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "status": "error",
-                    "summary": "No active conversation found for the provided Call SID"
-                }
-            )
-
-        agent = ai_agents[call_sid]
-        result = agent.get_latest_summary()
-        
-        if result["status"] == "pending":
-            return JSONResponse(
-                status_code=202,  # 202 Accepted indicates the request is processing
-                content=result
-            )
-            
-        return JSONResponse(content=result)
-        
-    except Exception as e:
-        logger.error(f"Error getting summary: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "summary": f"Error retrieving summary: {str(e)}"
-            }
-        )
 @router.post("/twilio/voice")  # Changed from GET to POST as Twilio makes POST requests
 async def handle_incoming_call(request: Request):
     try:
@@ -71,7 +49,7 @@ async def handle_incoming_call(request: Request):
         )
         # Include the user's name in the greeting if available
         greeting = f"Hello!{f' {user_name}' if user_name else ''} I'm calling from Toshal Infotech. Is this a good time to talk?"
-        gather.say(greeting)
+        gather.say(f'<speak><prosody rate="100%" pitch="+2st" volume="soft">{greeting}</prosody></speak>', ssml=True)
         response.append(gather)
         return Response(content=str(response), media_type='text/xml')
     except Exception as e:
@@ -88,6 +66,9 @@ async def process_speech(request: Request):
         form_data = await request.form()
         call_sid = form_data.get('CallSid')
         speech_result = form_data.get('SpeechResult', '')
+        
+        # Add print message for user input
+        print(f"User input received:\n {speech_result}")  # Print user input
         
         if call_sid not in ai_agents:
             ai_agents[call_sid] = AI_SalesAgent()
@@ -116,7 +97,7 @@ async def process_speech(request: Request):
                     gather.pause(length=0.3)
             
             # Add the main response
-            gather.say(response_text)
+            gather.say(f'<speak><prosody rate="100%" pitch="+2st" volume="loud">{response_text}</prosody></speak>', ssml=True)
             response.append(gather)
         return Response(content=str(response), media_type='text/xml')
             
@@ -184,6 +165,7 @@ async def make_outbound_call(request: Request):
             to=phone_number,
             from_=settings.TWILIO_FROM_NUMBER,
             url=f"{ngrok_url}/twilio/voice",  # Initial URL
+            status_callback=f"{ngrok_url}/call_ends",  # Updated: removed path parameter
             status_callback_event=['completed', 'failed']
         )
         
@@ -194,7 +176,7 @@ async def make_outbound_call(request: Request):
         
         # Set the status callback
         call = twilio_client.calls(call.sid).update(
-            status_callback=f"{ngrok_url}/twilio/status/{call.sid}"
+            status_callback=f"{ngrok_url}/call_ends" # Updated: removed path parameter
         )
         
         return JSONResponse({
@@ -221,11 +203,6 @@ async def handle_call_status(call_sid: str, request: Request):
                 del caller_names[call_sid]
                 logger.info(f"Cleaned up name for call {call_sid}")
         
-        return JSONResponse({"status": "success"})
-    except Exception as e:
-        logger.error(f"Error handling call status: {str(e)}")
-        return JSONResponse({"status": "error", "message": str(e)})
-    try:
         twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         call = twilio_client.calls(call_sid).fetch()
         
@@ -241,7 +218,7 @@ async def handle_call_status(call_sid: str, request: Request):
             'ringing': 'initiating'
         }
         
-        mapped_status = status_mapping.get(call.status, 'active')
+        mapped_status = status_mapping.get(call.status, 'failed')
         
         return JSONResponse({
             "status": mapped_status,
@@ -254,3 +231,109 @@ async def handle_call_status(call_sid: str, request: Request):
             "status": "error",
             "message": str(e)
         }, status_code=500)
+
+@router.post("/call_ends")
+@router.get("/call_ends/{call_sid}", response_model=SummaryResponse)
+async def call_ends(request: Request = None, call_sid: str = None):
+    """
+    Endpoint to handle call end events and generate a summary.
+    Supports both POST (from Twilio callbacks) and GET (with explicit call_sid) methods.
+    """
+    print("**********************")
+    print("Call Ends Successfully")
+    print("**********************")
+    
+    try:
+        # Handle POST request from Twilio callback
+        if request and not call_sid:
+            form_data = await request.form()
+            call_sid = form_data.get('CallSid')
+            
+            if not call_sid:
+                logger.error("No CallSid provided in the request")
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "status": "error",
+                        "summary": "No CallSid provided in the request"
+                    }
+                )
+                
+        # Check if we have an agent for this call_sid
+        if call_sid not in ai_agents:
+            logger.warning(f"No active conversation found for Call SID: {call_sid}")
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": "error",
+                    "summary": "No active conversation found for the provided Call SID"
+                }
+            )
+
+        agent = ai_agents[call_sid]
+        await agent.print_summary()
+
+        try:
+            # Check for required entities and ensure they are not null
+            required_entities = ['name', 'email', 'company_name', 'meeting_date', 'meeting_time']
+            if all(agent.client_entities.get(entity) for entity in required_entities):
+                # Sanitize email before creating calendar event and Salesforce lead
+                sanitized_email = agent.sanitize_email(agent.client_entities.get('email', ''))
+                if sanitized_email:
+                    agent.client_entities['email'] = sanitized_email
+                    
+                    # Log the client entities before creating the lead
+                    logger.info(f"Creating lead with the following client entities: {agent.client_entities}")
+
+                    # Create Google Calendar event and Salesforce lead concurrently
+                    calendar_task = asyncio.create_task(agent.calendar_manager.create_calendar_event(agent.client_entities))
+                    salesforce_task = asyncio.create_task(agent.salesforce_integration.create_lead(agent.client_entities))
+                    await asyncio.gather(calendar_task, salesforce_task)
+
+                    # Add print message after generating lead and event
+                    print("Lead generated on Salesforce and calendar event created successfully.")
+                    
+                else:
+                    logger.error("Invalid email address provided. Cannot create calendar event or Salesforce lead.")
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "status": "error",
+                            "summary": "Invalid email address provided."
+                        }
+                    )
+            else:
+                missing_entities = [entity for entity in required_entities if not agent.client_entities.get(entity)]
+                logger.warning(f"Required entities are missing or null: {missing_entities}. Client entities: {agent.client_entities}")
+                print(f"Required entities are missing or null: {missing_entities}. Continuing with other processes.")
+        except Exception as e:
+            logger.error(f"Error creating lead or calendar event: {e}")
+            print(f"Error creating lead or calendar event: {e}")
+            
+        # Generate the summary regardless of lead and event creation
+        result = agent.get_latest_summary()
+        print("<<<<<<<<<<<<<< Summary >>>>>>>>>>>>>>>>>>>\n", result)
+        if result["status"] == "pending":
+            return JSONResponse(
+                status_code=202,  # 202 Accepted indicates the request is processing
+                content=result
+            )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error getting summary: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "summary": f"Error retrieving summary: {str(e)}"
+            }
+        )
+    
+@router.get("/config")
+async def get_config(request: Request):
+    return {
+        "wsUrl": server_URL
+    }
+
