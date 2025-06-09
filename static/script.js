@@ -49,7 +49,7 @@ class VoiceChatApp {
 
     // Disable outbound call button by default
     if (this.makeOutboundCallButton) {
-      this.makeOutboundCallButton.disabled = true;
+      this.makeOutboundCallButton.disabled = false;
     }
 
     // Enable recording by default

@@ -8,6 +8,7 @@ from ..config import settings  # Ensure you have a config file to load environme
 import logging  # Import logging
 from pydantic import BaseModel
 import asyncio
+from ..utils.constants import OUTBOUND_GREETING_TEMPLATE
 
 server_URL = settings.NGROK_URL  # Ensure you have a config file to load environment variables
 
@@ -48,7 +49,7 @@ async def handle_incoming_call(request: Request):
             timeout=5
         )
         # Include the user's name in the greeting if available
-        greeting = f"Hello!{f' {user_name}' if user_name else ''} I'm calling from Toshal Infotech. Is this a good time to talk?"
+        greeting = OUTBOUND_GREETING_TEMPLATE.format(user_name_part=user_name) if user_name else OUTBOUND_GREETING_TEMPLATE.format(user_name_part="")
         gather.say(f'<speak><prosody rate="100%" pitch="+2st" volume="soft">{greeting}</prosody></speak>', ssml=True)
         response.append(gather)
         return Response(content=str(response), media_type='text/xml')
@@ -56,7 +57,7 @@ async def handle_incoming_call(request: Request):
         logger.error(f"Error in handle_incoming_call: {str(e)}")
         # Provide a fallback response in case of error
         response = VoiceResponse()
-        response.say("Hello! I'm calling from Toshal Infotech. Is this a good time to talk?")
+        response.say(f"{OUTBOUND_GREETING_TEMPLATE}")
         return Response(content=str(response), media_type='text/xml')
 
 
