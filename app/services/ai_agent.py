@@ -354,7 +354,7 @@ class AI_SalesAgent:
                     model="gpt-3.5-turbo-1106",
                     messages=summary_prompt,
                     temperature=0.1,
-                    max_tokens=150
+                    max_tokens=200
                 )
             )
 
